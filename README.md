@@ -43,9 +43,30 @@ Accessing with ssh to nodes defined
 vagrant ssh default
 
 ```
-Use the deploy.sh for create the Kubernetes nodes
+Use the Vagrantfile, it defines: Image for Ubuntu, v.cpus and v.memory, Docker, Containerlab and KIND
+
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/ubuntu-24.04"
+  config.vm.box_version = "202510.26.0"
+  config.vm.hostname = "core-bank"
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+Once that you get in the VM using vagrant ssh into VMGuest you should run
+
+
+```
+chmod +x deploy.sh
+./deploy.sh
+```
+this shell is using kind-cluster.yaml and manifests/all.yaml
+
 
 Use the topology.sh for create the Kubernetes topology
+Use the deploy.sh for create the Kubernetes nodes
+
+
+
 
 
 
