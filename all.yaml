@@ -1,0 +1,344 @@
+# manifests/all.yaml
+---
+# NAMESPACES
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dmz
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: internal-apps
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: admin
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: core
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external
+---
+# DMZ: web servers (2 replicas) exposed via NodePort 30001
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-dmz
+  namespace: dmz
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web-dmz
+  template:
+    metadata:
+      labels:
+        app: web-dmz
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:stable-alpine
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-dmz-svc
+  namespace: dmz
+spec:
+  type: NodePort
+  selector:
+    app: web-dmz
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30001
+---
+# INTERNAL APPS: 3 replicas (app-01..03). Service is NodePort 30000 per your requirement.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: internal-app
+  namespace: internal-apps
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: internal-app
+  template:
+    metadata:
+      labels:
+        app: internal-app
+    spec:
+      containers:
+      - name: app
+        image: hashicorp/http-echo:0.2.3
+        args: ["-text", "hello from internal-app", "-status", "200", "-listen", ":3000"]
+        ports:
+        - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: internal-app-svc
+  namespace: internal-apps
+spec:
+  type: NodePort
+  selector:
+    app: internal-app
+  ports:
+    - port: 80        # service port
+      targetPort: 3000
+      nodePort: 30000
+---
+# ADMIN server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-svc-deploy
+  namespace: admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: admin-svc
+  template:
+    metadata:
+      labels:
+        app: admin-svc
+    spec:
+      containers:
+      - name: admin
+        image: hashicorp/http-echo:0.2.3
+        args: ["-text", "admin console", "-listen", ":8080"]
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-svc
+  namespace: admin
+spec:
+  selector:
+    app: admin-svc
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+# CORE: Stateful DB (simple single-replica MySQL) and a mock core service
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: viridian-db
+  namespace: core
+spec:
+  serviceName: "viridian-db"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: viridian-db
+  template:
+    metadata:
+      labels:
+        app: viridian-db
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: rootpassword
+        - name: MYSQL_DATABASE
+          value: viridian
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: viridian-db-svc
+  namespace: core
+spec:
+  selector:
+    app: viridian-db
+  ports:
+    - port: 3306
+      targetPort: 3306
+---
+# MOCK Core banking app (ClusterIP)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-mock
+  namespace: core
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: core-mock
+  template:
+    metadata:
+      labels:
+        app: core-mock
+    spec:
+      containers:
+      - name: core
+        image: hashicorp/http-echo:0.2.3
+        args: ["-text", "core banking", "-listen", ":8081"]
+        ports:
+        - containerPort: 8081
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: core-mock-svc
+  namespace: core
+spec:
+  selector:
+    app: core-mock
+  ports:
+    - port: 8081
+      targetPort: 8081
+---
+# EXTERNAL MOCK (third-party)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-api
+  namespace: external
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: external-api
+  template:
+    metadata:
+      labels:
+        app: external-api
+    spec:
+      containers:
+      - name: httpbin
+        image: kennethreitz/httpbin
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-api-svc
+  namespace: external
+spec:
+  selector:
+    app: external-api
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# NETWORK POLICIES (simulate firewall segmentation)
+# internal-apps: only allow ingress from dmz and admin namespaces (simulate controlled access)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-dmz-admin
+  namespace: internal-apps
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          zone: dmz
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          zone: admin
+---
+# core: allow ingress from internal-apps and admin only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: core-allow-internal-admin
+  namespace: core
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          zone: internal
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          zone: admin
+---
+# Label the namespaces so NetworkPolicies can match
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dmz
+  labels:
+    zone: dmz
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: internal-apps
+  labels:
+    zone: internal
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: admin
+  labels:
+    zone: admin
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: core
+  labels:
+    zone: core
+---
+# OPTIONAL: an Ingress (cluster-level) - only works after ingress-nginx is installed. This exposes web-dmz svc internally
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dmz-ingress
+  namespace: dmz
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web-dmz-svc
+                port:
+                  number: 80
