@@ -53,7 +53,7 @@ Vagrant.configure("2") do |config|
   config.vm.synced_folder ".", "/vagrant", disabled: true
 
 Once that you get in the VM using vagrant ssh into VMGuest you should run
-
+Use the deploy.sh for create the Kubernetes nodes
 
 ```
 chmod +x deploy.sh
@@ -61,9 +61,24 @@ chmod +x deploy.sh
 ```
 this shell is using kind-cluster.yaml and manifests/all.yaml
 
+To validate the cluster is running properly
+```
+kind get clusters
+kubectl cluster-info
+kubectl get nodes
+```
+to get the kubernetes services are the namespaces
+```
+kubectl get svc --all-namespaces
+docker ps --format "table {{.Names}}\t{{.Ports}}" | grep control-plane
+```
+How to list and map everything inside the cluster
+```
+kubectl get all -A
+```
 
 Use the topology.sh for create the Kubernetes topology
-Use the deploy.sh for create the Kubernetes nodes
+
 
 
 
